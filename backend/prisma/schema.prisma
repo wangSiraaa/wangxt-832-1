@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Store {
+  id        String      @id @default(uuid())
+  code      String      @unique
+  name      String
+  address   String?
+  createdAt DateTime    @default(now())
+  orders    StoreOrder[]
+}
+
+model Dish {
+  id           String       @id @default(uuid())
+  code         String       @unique
+  name         String
+  description  String?
+  price        Decimal      @db.Decimal(65, 30)
+  recipeItems  RecipeItem[]
+  orderItems   OrderItem[]
+  scheduleItems ScheduleItem[]
+}
+
+model RawMaterial {
+  id         String       @id @default(uuid())
+  code       String       @unique
+  name       String
+  unit       String
+  inventory  Inventory?
+  recipeItems RecipeItem[]
+  checks     MaterialCheck[]
+}
+
+model Inventory {
+  id            String       @id @default(uuid())
+  rawMaterialId String       @unique
+  quantity      Decimal      @db.Decimal(65, 30)
+  updatedAt     DateTime
+  rawMaterial   RawMaterial  @relation(fields: [rawMaterialId], references: [id])
+}
+
+model RecipeItem {
+  id            String      @id @default(uuid())
+  dishId        String
+  rawMaterialId String
+  quantity      Decimal     @db.Decimal(65, 30)
+  dish          Dish        @relation(fields: [dishId], references: [id])
+  rawMaterial   RawMaterial @relation(fields: [rawMaterialId], references: [id])
+
+  @@unique([dishId, rawMaterialId])
+}
+
+model StoreOrder {
+  id        String             @id @default(uuid())
+  storeId   String
+  orderNo   String             @unique
+  orderDate DateTime
+  status    String             @default("SUBMITTED")
+  remark    String?
+  createdAt DateTime           @default(now())
+  store     Store              @relation(fields: [storeId], references: [id])
+  items     OrderItem[]
+  schedules ProductionSchedule[]
+}
+
+model OrderItem {
+  id           String     @id @default(uuid())
+  storeOrderId String
+  dishId       String
+  quantity     Int
+  storeOrder   StoreOrder @relation(fields: [storeOrderId], references: [id])
+  dish         Dish       @relation(fields: [dishId], references: [id])
+
+  @@unique([storeOrderId, dishId])
+}
+
+model ProductionSchedule {
+  id                String          @id @default(uuid())
+  scheduleNo        String          @unique
+  storeOrderId      String
+  scheduleDate      DateTime
+  status            String          @default("PENDING")
+  remark            String?
+  createdAt         DateTime        @default(now())
+  confirmedAt       DateTime?
+  qualityCheckedAt  DateTime?
+  deliveredAt       DateTime?
+  storeOrder        StoreOrder      @relation(fields: [storeOrderId], references: [id])
+  items             ScheduleItem[]
+  materialChecks    MaterialCheck[]
+}
+
+model ScheduleItem {
+  id                   String             @id @default(uuid())
+  productionScheduleId String
+  dishId               String
+  plannedQuantity      Int
+  actualQuantity       Int?
+  productionSchedule   ProductionSchedule @relation(fields: [productionScheduleId], references: [id])
+  dish                 Dish               @relation(fields: [dishId], references: [id])
+
+  @@unique([productionScheduleId, dishId])
+}
+
+model MaterialCheck {
+  id                   String             @id @default(uuid())
+  productionScheduleId String
+  rawMaterialId        String
+  requiredQuantity     Decimal            @db.Decimal(65, 30)
+  availableQuantity    Decimal            @db.Decimal(65, 30)
+  isSufficient         Boolean
+  checkedAt            DateTime           @default(now())
+  productionSchedule   ProductionSchedule @relation(fields: [productionScheduleId], references: [id])
+  rawMaterial          RawMaterial        @relation(fields: [rawMaterialId], references: [id])
+}
