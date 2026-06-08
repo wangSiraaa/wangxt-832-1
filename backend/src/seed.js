@@ -116,7 +116,8 @@ async function seed() {
           code: dish.code,
           name: dish.name,
           description: dish.description,
-          price: dish.price
+          price: dish.price,
+          currentRecipeVersion: 2
         }
       });
 
@@ -129,7 +130,61 @@ async function seed() {
           }
         });
       }
-      console.log(`已创建菜品: ${dish.name}`);
+
+      const oldRecipes = {
+        'D001': [
+          { code: 'RM001', quantity: 0.15 },
+          { code: 'RM002', quantity: 0.1 },
+          { code: 'RM004', quantity: 0.08 }
+        ],
+        'D002': [
+          { code: 'RM001', quantity: 0.1 },
+          { code: 'RM003', quantity: 0.08 },
+          { code: 'RM006', quantity: 0.015 },
+          { code: 'RM007', quantity: 0.02 }
+        ]
+      };
+
+      const oldRecipe = oldRecipes[dish.code];
+      if (oldRecipe) {
+        const version1 = await prisma.recipeVersion.create({
+          data: {
+            dishId: newDish.id,
+            version: 1,
+            remark: '初始配方版本',
+            createdBy: 'system'
+          }
+        });
+        for (const item of oldRecipe) {
+          await prisma.recipeVersionItem.create({
+            data: {
+              recipeVersionId: version1.id,
+              rawMaterialId: matMap[item.code],
+              quantity: item.quantity
+            }
+          });
+        }
+        console.log(`已创建 ${dish.name} 的旧配方版本 v1`);
+      }
+
+      const version2 = await prisma.recipeVersion.create({
+        data: {
+          dishId: newDish.id,
+          version: 2,
+          remark: '优化配方，调整原料比例',
+          createdBy: 'chef_zhang'
+        }
+      });
+      for (const item of dish.recipe) {
+        await prisma.recipeVersionItem.create({
+          data: {
+            recipeVersionId: version2.id,
+            rawMaterialId: matMap[item.code],
+            quantity: item.quantity
+          }
+        });
+      }
+      console.log(`已创建菜品: ${dish.name}, 当前配方版本 v2`);
     }
   }
 

@@ -17,24 +17,27 @@ model Store {
 }
 
 model Dish {
-  id           String       @id @default(uuid())
-  code         String       @unique
-  name         String
-  description  String?
-  price        Decimal      @db.Decimal(65, 30)
-  recipeItems  RecipeItem[]
-  orderItems   OrderItem[]
-  scheduleItems ScheduleItem[]
+  id                    String            @id @default(uuid())
+  code                  String            @unique
+  name                  String
+  description           String?
+  price                 Decimal           @db.Decimal(65, 30)
+  currentRecipeVersion  Int               @default(1)
+  recipeItems           RecipeItem[]
+  recipeVersions        RecipeVersion[]
+  orderItems            OrderItem[]
+  scheduleItems         ScheduleItem[]
 }
 
 model RawMaterial {
-  id         String       @id @default(uuid())
-  code       String       @unique
-  name       String
-  unit       String
-  inventory  Inventory?
-  recipeItems RecipeItem[]
-  checks     MaterialCheck[]
+  id                String                @id @default(uuid())
+  code              String                @unique
+  name              String
+  unit              String
+  inventory         Inventory?
+  recipeItems       RecipeItem[]
+  recipeVersionItems RecipeVersionItem[]
+  checks            MaterialCheck[]
 }
 
 model Inventory {
@@ -43,6 +46,30 @@ model Inventory {
   quantity      Decimal      @db.Decimal(65, 30)
   updatedAt     DateTime
   rawMaterial   RawMaterial  @relation(fields: [rawMaterialId], references: [id])
+}
+
+model RecipeVersion {
+  id         String                @id @default(uuid())
+  dishId     String
+  version    Int
+  remark     String?
+  createdAt  DateTime              @default(now())
+  createdBy  String?
+  dish       Dish                  @relation(fields: [dishId], references: [id])
+  items      RecipeVersionItem[]
+
+  @@unique([dishId, version])
+}
+
+model RecipeVersionItem {
+  id                String          @id @default(uuid())
+  recipeVersionId   String
+  rawMaterialId     String
+  quantity          Decimal         @db.Decimal(65, 30)
+  recipeVersion     RecipeVersion   @relation(fields: [recipeVersionId], references: [id])
+  rawMaterial       RawMaterial     @relation(fields: [rawMaterialId], references: [id])
+
+  @@unique([recipeVersionId, rawMaterialId])
 }
 
 model RecipeItem {
@@ -56,17 +83,50 @@ model RecipeItem {
   @@unique([dishId, rawMaterialId])
 }
 
+model RecipeReuseCheck {
+  id                   String               @id @default(uuid())
+  storeOrderId         String
+  checkedAt            DateTime             @default(now())
+  checkedBy            String?
+  hasReusedRecipes     Boolean
+  reuseDetails         Json?
+  materialImpact       Json?
+  storeOrder           StoreOrder           @relation(fields: [storeOrderId], references: [id])
+  events               RecipeReuseEvent[]
+
+  @@unique([storeOrderId])
+}
+
+model RecipeReuseEvent {
+  id                 String            @id @default(uuid())
+  recipeReuseCheckId String
+  eventType          String
+  dishId             String?
+  dishName           String?
+  oldVersion         Int?
+  newVersion         Int?
+  materialId         String?
+  materialName       String?
+  extraUsage         Decimal?          @db.Decimal(65, 30)
+  sourceOrderNo      String?
+  sourceScheduleNo   String?
+  happenedAt         DateTime          @default(now())
+  remark             String?
+  check              RecipeReuseCheck  @relation(fields: [recipeReuseCheckId], references: [id])
+}
+
 model StoreOrder {
-  id        String             @id @default(uuid())
-  storeId   String
-  orderNo   String             @unique
-  orderDate DateTime
-  status    String             @default("SUBMITTED")
-  remark    String?
-  createdAt DateTime           @default(now())
-  store     Store              @relation(fields: [storeId], references: [id])
-  items     OrderItem[]
-  schedules ProductionSchedule[]
+  id                String             @id @default(uuid())
+  storeId           String
+  orderNo           String             @unique
+  orderDate         DateTime
+  status            String             @default("SUBMITTED")
+  remark            String?
+  createdAt         DateTime           @default(now())
+  store             Store              @relation(fields: [storeId], references: [id])
+  items             OrderItem[]
+  schedules         ProductionSchedule[]
+  recipeReuseCheck  RecipeReuseCheck?
 }
 
 model OrderItem {

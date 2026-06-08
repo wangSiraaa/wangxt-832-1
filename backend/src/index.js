@@ -14,6 +14,7 @@ const productionScheduleRoutes = require('./routes/productionSchedules');
 const qualityControlRoutes = require('./routes/qualityControl');
 const deliveryRoutes = require('./routes/delivery');
 const alertRoutes = require('./routes/alerts');
+const recipeReuseCheckRoutes = require('./routes/recipeReuseCheck');
 
 const prisma = new PrismaClient();
 const app = express();
@@ -43,6 +44,7 @@ app.use('/api/production-schedules', productionScheduleRoutes);
 app.use('/api/quality-control', qualityControlRoutes);
 app.use('/api/delivery', deliveryRoutes);
 app.use('/api/alerts', alertRoutes);
+app.use('/api/recipe-reuse-check', recipeReuseCheckRoutes);
 
 app.use((err, req, res, next) => {
   console.error('Error:', err);

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { checkRecipeReuse } = require('./recipeReuseCheck');
 
 async function checkMaterialsForSchedule(prisma, orderId, scheduleItems) {
   const order = await prisma.storeOrder.findUnique({
@@ -134,12 +135,13 @@ router.post('/check-materials', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { storeOrderId, scheduleNo, scheduleDate, remark, items } = req.body;
+    const { storeOrderId, scheduleNo, scheduleDate, remark, items, checkedBy } = req.body;
 
     if (!storeOrderId || !scheduleNo || !scheduleDate || !items || items.length === 0) {
       return res.status(400).json({ error: '订单ID、排产编号、排产日期和排产项不能为空', code: 'INVALID_INPUT' });
     }
 
+    const reuseCheckResult = await checkRecipeReuse(req.prisma, storeOrderId, checkedBy);
     const materialResult = await checkMaterialsForSchedule(req.prisma, storeOrderId, items);
 
     const schedule = await req.prisma.$transaction(async (prisma) => {
@@ -186,7 +188,14 @@ router.post('/', async (req, res, next) => {
       });
     });
 
-    res.status(201).json(schedule);
+    res.status(201).json({
+      ...schedule,
+      recipeReuseCheck: {
+        hasReusedRecipes: reuseCheckResult.hasReusedRecipes,
+        reusedDishes: reuseCheckResult.reusedDishes || [],
+        materialImpact: reuseCheckResult.materialImpact || []
+      }
+    });
   } catch (error) {
     next(error);
   }

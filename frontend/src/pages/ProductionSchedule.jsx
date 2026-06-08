@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Table, Button, Space, Tag, Modal, Form, InputNumber,
-  DatePicker, message, Alert, List, Progress, Typography
+  DatePicker, message, Alert, List, Progress, Typography,
+  Timeline, Descriptions, Tooltip, Empty
 } from 'antd'
 import {
   PlayCircleOutlined, CheckCircleOutlined, EyeOutlined,
-  ExclamationCircleOutlined, ReloadOutlined
+  ExclamationCircleOutlined, ReloadOutlined,
+  WarningOutlined, HistoryOutlined, ClockCircleOutlined,
+  RiseOutlined, InfoCircleOutlined
 } from '@ant-design/icons'
 import {
-  storeOrderApi, productionScheduleApi, dishApi
+  storeOrderApi, productionScheduleApi, dishApi, recipeReuseCheckApi
 } from '../api'
 import dayjs from 'dayjs'
 
-const { Title, Text } = Typography
+const { Title, Text, Paragraph } = Typography
 
 function ProductionSchedule() {
   const [schedules, setSchedules] = useState([])
@@ -21,11 +24,20 @@ function ProductionSchedule() {
   const [loading, setLoading] = useState(false)
   const [createModalVisible, setCreateModalVisible] = useState(false)
   const [checkModalVisible, setCheckModalVisible] = useState(false)
+  const [reuseCheckModalVisible, setReuseCheckModalVisible] = useState(false)
+  const [timelineModalVisible, setTimelineModalVisible] = useState(false)
+  const [historicalModalVisible, setHistoricalModalVisible] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState(null)
+  const [selectedDish, setSelectedDish] = useState(null)
   const [scheduleItems, setScheduleItems] = useState([])
   const [materialCheckResult, setMaterialCheckResult] = useState(null)
+  const [reuseCheckResult, setReuseCheckResult] = useState(null)
+  const [timelineData, setTimelineData] = useState([])
+  const [historicalData, setHistoricalData] = useState(null)
   const [scheduleDate, setScheduleDate] = useState(dayjs())
   const [confirming, setConfirming] = useState(false)
+  const [showReuseWarning, setShowReuseWarning] = useState(false)
+  const [checkedBy, setCheckedBy] = useState('operator')
 
   useEffect(() => {
     loadData()
@@ -60,7 +72,56 @@ function ProductionSchedule() {
     }))
     setScheduleItems(items)
     setScheduleDate(dayjs())
+    setShowReuseWarning(false)
+    setReuseCheckResult(null)
+
+    try {
+      setLoading(true)
+      const result = await recipeReuseCheckApi.check(order.id, checkedBy)
+      if (result.success && result.data.hasReusedRecipes) {
+        setReuseCheckResult(result.data)
+        setShowReuseWarning(true)
+      }
+    } catch (e) {
+      console.warn('配方复用检查失败:', e)
+    } finally {
+      setLoading(false)
+    }
+
     setCreateModalVisible(true)
+  }
+
+  const handleViewTimeline = async () => {
+    if (!selectedOrder) return
+    try {
+      setLoading(true)
+      const result = await recipeReuseCheckApi.getTimeline(selectedOrder.id)
+      if (result.success) {
+        setTimelineData(result.data)
+        setTimelineModalVisible(true)
+      }
+    } catch (e) {
+      message.error('获取时间线失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleViewHistorical = async (dishId, dishName) => {
+    if (!selectedOrder) return
+    try {
+      setLoading(true)
+      setSelectedDish({ id: dishId, name: dishName })
+      const result = await recipeReuseCheckApi.getHistorical(selectedOrder.id, dishId)
+      if (result.success) {
+        setHistoricalData(result.data)
+        setHistoricalModalVisible(true)
+      }
+    } catch (e) {
+      message.error('获取历史来源失败')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleCheckMaterials = async () => {
@@ -89,27 +150,34 @@ function ProductionSchedule() {
 
     try {
       setLoading(true)
-      const result = await productionScheduleApi.checkMaterials({
+      const materialResult = await productionScheduleApi.checkMaterials({
         storeOrderId: selectedOrder.id,
         items: scheduleItems.map(item => ({
           dishId: item.dishId,
           plannedQuantity: item.plannedQuantity
         }))
       })
-      setMaterialCheckResult(result)
+      setMaterialCheckResult(materialResult)
 
       const scheduleNo = `SCH${Date.now()}`
-      await productionScheduleApi.create({
+      const createResult = await productionScheduleApi.create({
         storeOrderId: selectedOrder.id,
         scheduleNo,
         scheduleDate: scheduleDate.format('YYYY-MM-DD'),
         items: scheduleItems.map(item => ({
           dishId: item.dishId,
           plannedQuantity: item.plannedQuantity
-        }))
+        })),
+        checkedBy
       })
 
-      message.success('排产创建成功，原料校验完成')
+      if (createResult.recipeReuseCheck?.hasReusedRecipes) {
+        setReuseCheckResult(createResult.recipeReuseCheck)
+        setReuseCheckModalVisible(true)
+      } else {
+        message.success('排产创建成功，原料校验完成')
+      }
+
       setCreateModalVisible(false)
       loadData()
     } catch (e) {
@@ -240,6 +308,24 @@ function ProductionSchedule() {
     }
   ]
 
+  const getEventIcon = (eventType) => {
+    switch (eventType) {
+      case 'DISH_REUSED': return <WarningOutlined style={{ color: '#faad14' }} />
+      case 'MATERIAL_IMPACT': return <RiseOutlined style={{ color: '#fa8c16' }} />
+      case 'HISTORICAL_SOURCE': return <HistoryOutlined style={{ color: '#1890ff' }} />
+      default: return <ClockCircleOutlined />
+    }
+  }
+
+  const getEventColor = (eventType) => {
+    switch (eventType) {
+      case 'DISH_REUSED': return 'gold'
+      case 'MATERIAL_IMPACT': return 'orange'
+      case 'HISTORICAL_SOURCE': return 'blue'
+      default: return 'gray'
+    }
+  }
+
   const orderColumns = [
     { title: '订单号', dataIndex: 'orderNo', key: 'orderNo' },
     { title: '门店', dataIndex: ['store', 'name'], key: 'store' },
@@ -250,14 +336,26 @@ function ProductionSchedule() {
       title: '操作',
       key: 'action',
       render: (_, record) => (
-        <Button
-          type="primary"
-          size="small"
-          icon={<PlayCircleOutlined />}
-          onClick={() => handleCreateSchedule(record)}
-        >
-          创建排产
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlayCircleOutlined />}
+            onClick={() => handleCreateSchedule(record)}
+          >
+            创建排产
+          </Button>
+          <Button
+            size="small"
+            icon={<HistoryOutlined />}
+            onClick={async () => {
+              setSelectedOrder(record)
+              await handleViewTimeline()
+            }}
+          >
+            时间线
+          </Button>
+        </Space>
       )
     }
   ]
@@ -315,14 +413,104 @@ function ProductionSchedule() {
         onOk={handleCreateAndCheck}
         okText="创建并校验原料"
         cancelText="取消"
-        width={700}
+        width={800}
         confirmLoading={loading}
       >
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          {showReuseWarning && reuseCheckResult && (
+            <Alert
+              type="warning"
+              showIcon
+              icon={<WarningOutlined />}
+              message="检测到配方复用"
+              description={
+                <div>
+                  <Paragraph style={{ marginBottom: 8 }}>
+                    以下菜品沿用了历史配方，新配方将增加部分原料的消耗：
+                  </Paragraph>
+                  <List
+                    size="small"
+                    dataSource={reuseCheckResult.reusedDishes || []}
+                    renderItem={dish => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<HistoryOutlined />}
+                            onClick={() => handleViewHistorical(dish.dishId, dish.dishName)}
+                          >
+                            查看历史来源
+                          </Button>
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={
+                            <Space>
+                              {dish.dishName}
+                              <Tag color="gold">v{dish.oldVersion} → v{dish.newVersion}</Tag>
+                              <Tag color="blue">数量: {dish.quantity}</Tag>
+                            </Space>
+                          }
+                          description={
+                            dish.totalExtraUsage?.length > 0 && (
+                              <Space size="small" wrap>
+                                {dish.totalExtraUsage.map((u, idx) => (
+                                  <Tag key={idx} color="orange">
+                                    {u.rawMaterialName}: +{u.extraTotal.toFixed(2)} {u.unit}
+                                  </Tag>
+                                ))}
+                              </Space>
+                            )
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
+                  {reuseCheckResult.materialImpact?.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <Text strong type="warning">
+                        <RiseOutlined /> 原料额外消耗汇总：
+                      </Text>
+                      <List
+                        size="small"
+                        style={{ marginTop: 8 }}
+                        dataSource={reuseCheckResult.materialImpact}
+                        renderItem={mat => (
+                          <List.Item>
+                            <List.Item.Meta
+                              title={mat.rawMaterialName}
+                              description={
+                                <Space>
+                                  <span>额外消耗: <b style={{ color: '#fa8c16' }}>+{mat.extraTotal.toFixed(2)} {mat.unit}</b></span>
+                                  <span>影响菜品: {mat.affectedDishes?.map(d => d.dishName).join(', ')}</span>
+                                </Space>
+                              }
+                            />
+                          </List.Item>
+                        )}
+                      />
+                    </div>
+                  )}
+                  <div style={{ marginTop: 12 }}>
+                    <Button
+                      size="small"
+                      icon={<ClockCircleOutlined />}
+                      onClick={handleViewTimeline}
+                    >
+                      查看完整时间线
+                    </Button>
+                  </div>
+                </div>
+              }
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
           <div>
             <Text strong>订单信息</Text>
             <p style={{ margin: '8px 0' }}>
-              订单号: {selectedOrder?.orderNo} | 门店: {selectedOrder?.store?.name}
+              订单号: {selectedOrder?.orderNo} | 门店: {selectedOrder?.store?.name} | 处理人: {checkedBy}
             </p>
           </div>
 
@@ -398,6 +586,215 @@ function ProductionSchedule() {
               )}
             />
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        title="配方复用检查结果"
+        open={reuseCheckModalVisible}
+        onCancel={() => setReuseCheckModalVisible(false)}
+        width={700}
+        footer={[
+          <Button key="timeline" icon={<ClockCircleOutlined />} onClick={handleViewTimeline}>
+            查看时间线
+          </Button>,
+          <Button key="close" type="primary" onClick={() => {
+            setReuseCheckModalVisible(false)
+            message.success('排产创建成功，已记录配方复用检查结果')
+          }}>
+            确定
+          </Button>
+        ]}
+      >
+        {reuseCheckResult && (
+          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            <Alert
+              type="warning"
+              showIcon
+              message="已检测到配方复用"
+              description={`本次排产涉及 ${reuseCheckResult.reusedDishes?.length || 0} 个沿用历史配方的菜品，新配方将额外消耗部分原料。`}
+            />
+
+            <Title level={5}>沿用旧配方的菜品</Title>
+            <List
+              dataSource={reuseCheckResult.reusedDishes || []}
+              renderItem={dish => (
+                <List.Item
+                  actions={[
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<HistoryOutlined />}
+                      onClick={() => handleViewHistorical(dish.dishId, dish.dishName)}
+                    >
+                      查看历史来源
+                    </Button>
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        {dish.dishName}
+                        <Tag color="gold">v{dish.oldVersion} → v{dish.newVersion}</Tag>
+                      </Space>
+                    }
+                    description={
+                      <div>
+                        <p>数量: {dish.quantity}</p>
+                        {dish.totalExtraUsage?.length > 0 && (
+                          <Space wrap>
+                            {dish.totalExtraUsage.map((u, idx) => (
+                              <Tag key={idx} color={u.isIncrease ? 'orange' : 'green'}>
+                                {u.rawMaterialName}: {u.isIncrease ? '+' : ''}{u.difference.toFixed(3)}/份 = {u.extraTotal.toFixed(2)} {u.unit}
+                              </Tag>
+                            ))}
+                          </Space>
+                        )}
+                      </div>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+
+            {reuseCheckResult.materialImpact?.length > 0 && (
+              <>
+                <Title level={5}>新配方额外占用原料</Title>
+                <List
+                  dataSource={reuseCheckResult.materialImpact}
+                  renderItem={mat => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={
+                          <Space>
+                            {mat.rawMaterialName}
+                            <Tag color="orange">
+                              +{mat.extraTotal.toFixed(2)} {mat.unit}
+                            </Tag>
+                          </Space>
+                        }
+                        description={
+                          <span>
+                            影响菜品: {mat.affectedDishes?.map(d => d.dishName).join(', ')}
+                          </span>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              </>
+            )}
+          </Space>
+        )}
+      </Modal>
+
+      <Modal
+        title="配方复用时间线"
+        open={timelineModalVisible}
+        onCancel={() => setTimelineModalVisible(false)}
+        width={650}
+        footer={[
+          <Button key="close" onClick={() => setTimelineModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+      >
+        <Timeline
+          mode="left"
+          items={timelineData.map(event => ({
+            color: getEventColor(event.eventType),
+            dot: getEventIcon(event.eventType),
+            children: (
+              <div>
+                <Space>
+                  <Tag color={getEventColor(event.eventType)}>
+                    {event.eventType === 'DISH_REUSED' ? '配方复用' :
+                     event.eventType === 'MATERIAL_IMPACT' ? '原料影响' :
+                     event.eventType === 'HISTORICAL_SOURCE' ? '历史来源' : event.eventType}
+                  </Tag>
+                  {event.dishName && <Text strong>{event.dishName}</Text>}
+                  {event.materialName && <Text strong>{event.materialName}</Text>}
+                </Space>
+                <p style={{ marginTop: 4, marginBottom: 0 }}>{event.remark}</p>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {dayjs(event.happenedAt).format('YYYY-MM-DD HH:mm:ss')}
+                </Text>
+              </div>
+            )
+          }))}
+        />
+        {timelineData.length === 0 && (
+          <Empty description="暂无时间线记录" />
+        )}
+      </Modal>
+
+      <Modal
+        title={`历史来源 - ${selectedDish?.name || ''}`}
+        open={historicalModalVisible}
+        onCancel={() => setHistoricalModalVisible(false)}
+        width={750}
+        footer={[
+          <Button key="close" onClick={() => setHistoricalModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+      >
+        {historicalData && (
+          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            <Descriptions title="配方版本对比" size="small" bordered column={1}>
+              <Descriptions.Item label="菜品">
+                {historicalData.dish?.name} ({historicalData.dish?.code})
+              </Descriptions.Item>
+              <Descriptions.Item label="当前版本">
+                v{historicalData.dish?.currentRecipeVersion}
+              </Descriptions.Item>
+            </Descriptions>
+
+            {historicalData.materialDiff?.length > 0 && (
+              <>
+                <Title level={5}>配方差异</Title>
+                <Table
+                  size="small"
+                  dataSource={historicalData.materialDiff}
+                  rowKey="rawMaterialId"
+                  pagination={false}
+                  columns={[
+                    { title: '原料', dataIndex: 'rawMaterialName', key: 'name' },
+                    { title: '旧配方用量', dataIndex: 'oldQuantity', key: 'old', render: v => `${v.toFixed(3)}/${historicalData.dish?.name}` },
+                    { title: '新配方用量', dataIndex: 'newQuantity', key: 'new', render: v => `${v.toFixed(3)}/${historicalData.dish?.name}` },
+                    { title: '差异', dataIndex: 'difference', key: 'diff', render: (v, r) => (
+                      <Tag color={r.isIncrease ? 'orange' : 'green'}>
+                        {r.isIncrease ? '+' : ''}{v.toFixed(3)}
+                      </Tag>
+                    )}
+                  ]}
+                />
+              </>
+            )}
+
+            {historicalData.historicalUsage?.length > 0 && (
+              <>
+                <Title level={5}>历史排产记录</Title>
+                <Table
+                  size="small"
+                  dataSource={historicalData.historicalUsage}
+                  rowKey="scheduleId"
+                  pagination={false}
+                  columns={[
+                    { title: '订单号', dataIndex: 'orderNo', key: 'order' },
+                    { title: '排产编号', dataIndex: 'scheduleNo', key: 'schedule' },
+                    { title: '排产日期', dataIndex: 'scheduleDate', key: 'date', render: d => dayjs(d).format('YYYY-MM-DD') },
+                    { title: '数量', dataIndex: 'quantity', key: 'qty' },
+                    { title: '状态', dataIndex: 'status', key: 'status', render: s => <Tag>{s}</Tag> }
+                  ]}
+                />
+              </>
+            )}
+
+            {historicalData.historicalUsage?.length === 0 && (
+              <Empty description="暂无历史排产记录" />
+            )}
+          </Space>
         )}
       </Modal>
     </Space>

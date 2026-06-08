@@ -54,6 +54,13 @@ export const productionScheduleApi = {
   confirm: (id) => api.post(`/production-schedules/${id}/confirm`)
 }
 
+export const recipeReuseCheckApi = {
+  check: (orderId, checkedBy) => api.post(`/recipe-reuse-check/check/${orderId}`, { checkedBy }),
+  getCheck: (orderId) => api.get(`/recipe-reuse-check/${orderId}`),
+  getTimeline: (orderId) => api.get(`/recipe-reuse-check/${orderId}/timeline`),
+  getHistorical: (orderId, dishId) => api.get(`/recipe-reuse-check/${orderId}/historical/${dishId}`)
+}
+
 export const qualityControlApi = {
   getAll: (params) => api.get('/quality-control', { params }),
   check: (id, data) => api.post(`/quality-control/${id}/check`, data)

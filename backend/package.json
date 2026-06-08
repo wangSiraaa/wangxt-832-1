@@ -10,6 +10,9 @@
     "prisma:migrate": "prisma migrate deploy",
     "seed": "node src/seed.js"
   },
+  "prisma": {
+    "seed": "node src/seed.js"
+  },
   "dependencies": {
     "@prisma/client": "^5.10.0",
     "cors": "^2.8.5",
